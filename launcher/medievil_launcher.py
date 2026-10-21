@@ -329,7 +329,7 @@ def game_environment(s):
     # Xbox in-game button prompts: the runtime pastes this glyph strip into the game's button
     # atlas (ApplyXboxGlyphs in texture_cache.cpp).
     if s.get('pad_style') == 'xbox':
-        strip = PORT_DIR / 'launcher' / 'assets' / 'xbox_glyph_strip.rgba'
+        strip = PORT_DIR / 'launcher' / 'assets' / 'xbox_glyph_strip.bgra'
         if strip.is_file():
             env['GOW3_XBOX_GLYPHS'] = str(strip)
     if str(s['player_name']).strip():

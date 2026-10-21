@@ -1278,7 +1278,7 @@ constexpr u32 GlyphAtlasSize = 1024;
 constexpr u32 GlyphStripRows = 64;
 constexpr size_t GlyphStripBytes = size_t(GlyphAtlasSize) * GlyphStripRows * 4;
 
-/// The Xbox glyph strip (1024x64 R8G8B8A8, the top rows of InventoryButtonAtlas) from
+/// The Xbox glyph strip (1024x64 B8G8R8A8, the top rows of InventoryButtonAtlas) from
 /// GOW3_XBOX_GLYPHS; empty when the file is missing or short.
 std::vector<u8> LoadXboxGlyphStrip(const char* path) {
     std::vector<u8> strip(GlyphStripBytes);
@@ -1326,7 +1326,7 @@ std::vector<u8> BuildGlyphMipChain(std::vector<u8> mip, u32 levels) {
 } // namespace
 
 void TextureCache::ApplyXboxGlyphs(Image& image) {
-    // MediEvil console button prompts: GOW3_XBOX_GLYPHS points to a 1024x64 R8G8B8A8 strip with
+    // MediEvil console button prompts: GOW3_XBOX_GLYPHS points to a 1024x64 B8G8R8A8 strip with
     // Xbox glyphs for the top of InventoryButtonAtlas. The pak stores the GPU-tiled texture, so
     // the swap runs at bind time: the atlas is read back, recognised by a hash of the game's own
     // rows below the strip, and reuploaded (all mips) with the strip pasted in.
