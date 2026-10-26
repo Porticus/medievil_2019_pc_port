@@ -2,10 +2,17 @@
 #undef NDEBUG /* the checks are asserts; release builds define NDEBUG */
 #include "../src/runtime_services.c"
 #include <assert.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 uintptr_t runtime_lookup(const RuntimeExport *table, size_t count, const char *nid) { (void)table; (void)count; (void)nid; return 0; }
 int gow3gpu_text_input_begin(const char *text, const char *prompt) { (void)text; (void)prompt; return 0; }
 int gow3gpu_text_input_poll(char *text, uint64_t size) { (void)text; (void)size; return 0; }
+static int toasts;
+void gow3gpu_toast_trophy(const char *title, const char *detail, const unsigned char *png, uint64_t png_size) { (void)title; (void)detail; (void)png; (void)png_size; toasts++; }
+void gow3gpu_trophy_setup(const Gow3GpuTrophyLabels *labels, const Gow3GpuTrophyInfo *items, int count, const volatile uint32_t *unlocked) { (void)labels; (void)items; (void)count; (void)unlocked; }
+static char user_dir[64];
+const char *runtime_file_user_dir(void) { return user_dir; }
 int64_t runtime_file_open(const char *path, int flags, int mode) { (void)path; (void)flags; (void)mode; return -1; }
 int64_t runtime_file_read(int fd, void *buffer, uint64_t size) { (void)fd; (void)buffer; (void)size; return -1; }
 int64_t runtime_file_close(int fd) { (void)fd; return 0; }
@@ -76,10 +83,24 @@ int main(void) {
     assert(playgo_todo(handle,&chunk,1)==0 && playgo_todo(handle,NULL,1)==PLAYGO_BAD_POINTER);
     assert(playgo_close(handle)==0 && playgo_close(handle)==PLAYGO_BAD_HANDLE && playgo_terminate()==0);
 
-    /* Trophies: nothing unlocked. */
+    /* Trophies: nothing unlocked at first; an unlock is noticed once and saved in trophies.dat. */
+    snprintf(user_dir,sizeof(user_dir),"/tmp/services-test-%d",(int)getpid());
+    mkdir(user_dir,0755);
     uint32_t flags[4]={~0u,~0u,~0u,~0u}, count=7;
     assert(trophy_unlock_state(1,1,flags,&count)==0 && !flags[0] && !flags[3] && count==0);
     assert(trophy_unlock_state(1,1,NULL,&count)==TROPHY_INVALID && trophy_release(0)==TROPHY_INVALID);
+    int32_t platinum=0;
+    assert(trophy_unlock(1,1,3,&platinum)==0 && platinum==-1 && toasts==1);
+    assert(trophy_unlock(1,1,3,&platinum)==TROPHY_ALREADY_UNLOCKED && toasts==1);
+    assert(trophy_unlock(1,1,128,&platinum)==TROPHY_INVALID);
+    assert(trophy_unlock_state(1,1,flags,&count)==0 && flags[0]==1u<<3 && !flags[1]);
+    char path[128]; uint32_t saved[4]={0};
+    snprintf(path,sizeof(path),"%s/trophies.dat",user_dir);
+    FILE *f=fopen(path,"rb");
+    assert(f && fread(saved,sizeof(saved),1,f)==1 && saved[0]==1u<<3); fclose(f);
+    memset(trophy_flags,0,sizeof(trophy_flags)); trophy_ready=0; /* a new run reads it back */
+    assert(trophy_unlock_state(1,1,flags,&count)==0 && flags[0]==1u<<3);
+    remove(path); rmdir(user_dir);
 
     float ratio=0; assert(safe_area(&ratio)==0 && ratio==1.0f && safe_area(NULL)==SYSTEM_PARAMETER);
     puts("services test: ok");

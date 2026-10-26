@@ -12,6 +12,7 @@ Frozen with PyInstaller the same MediEvil.exe also runs the game without the win
 run.py (`--run`) and the preparation scripts (`--script`), so a packaged port needs no Python.
 """
 import ctypes
+import io
 import json
 import os
 from pathlib import Path
@@ -117,6 +118,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import button_icons  # noqa: E402
 import theme  # noqa: E402
 import lang  # noqa: E402
+import trophies  # noqa: E402
 
 LANG = 'en'
 
@@ -337,8 +339,24 @@ def game_profile_of(folder):
     return title_id, game_profile(title_id, version) or game_profile(title_id)
 
 
+def write_trophy_texts(folder):
+    """<user dir>/trophy_texts.txt in the launcher's language: the game reads it at start (the notice
+    of an unlocked trophy and the list of F8 / R3+R2). Arabic stays English there: the in-game
+    overlay draws text left to right without joining the letters."""
+    tr = _ if LANG != 'ar' else (lambda en, ru=None: en)
+    labels = (('heading', tr('Trophies', 'Трофеи')), ('notice', tr('TROPHY UNLOCKED', 'ТРОФЕЙ ПОЛУЧЕН')),
+              ('unlocked', tr('UNLOCKED', 'ПОЛУЧЕН')), ('locked', tr('LOCKED', 'ЗАКРЫТ')),
+              ('all', tr('All trophies', 'Все')), ('only_unlocked', tr('Unlocked', 'Получены')),
+              ('only_locked', tr('Locked', 'Закрыты')),
+              ('counter', tr('{} of {} unlocked', '{} из {} получено')),
+              ('hint', tr('Up/Down: scroll   Left/Right: filter   F8 / R3+R2 / Esc: close',
+                          'Вверх/Вниз: прокрутка   Влево/Вправо: фильтр   F8 / R3+R2 / Esc: закрыть')))
+    trophies.write_texts(folder, labels, LANG if LANG != 'ar' else 'en')
+
+
 def game_environment(s):
     env = dict(os.environ)
+    write_trophy_texts(Path(s.get('user_dir') or DATA_DIR / 'user'))
     env['GOW3_GAME_DIR'] = s['game_dir']
     # The launcher's patch selection is the whole list (run.py, patches.py).
     title_id, profile = game_profile_of(s['game_dir'])
@@ -410,6 +428,8 @@ def game_environment(s):
 # and the green of souls.
 BG, PANEL, CARD, LINE = theme.NIGHT, theme.STONE, theme.CARD, theme.EDGE
 TEXT, MUTED, ACCENT, ACCENT_HI, GOLD = theme.BONE, theme.MIST, theme.SOUL_DARK, theme.SOUL, theme.GOLD
+TROPHY_TIERS = {'platinum': ('Platinum', 'Платина', '#8fd3e8'), 'gold': ('Gold', 'Золото', '#e0b43a'),
+                'silver': ('Silver', 'Серебро', '#c4c4c8'), 'bronze': ('Bronze', 'Бронза', '#cd7f32')}
 
 
 class ImageButton:
@@ -773,6 +793,7 @@ class Launcher:
         for name, title in (('home', _('Home')), ('display', _('Display')), ('performance', _('Performance')),
                             ('game', _('Game', 'Игра')), ('patches', _('Patches', 'Патчи')),
                             ('mods', _('Mods', 'Моды')), ('controls', _('Controls', 'Управление')),
+                            ('trophies', _('Trophies', 'Трофеи')),
                             ('advanced', _('Advanced', 'Дополнительно')), ('log', _('Log', 'Журнал'))):
             item = tk.Label(side, text='    ' + title, bg=BG, fg=TEXT, anchor='w', font=self.f('head', 13),
                             pady=8, cursor='hand2', bd=0)
@@ -818,6 +839,7 @@ class Launcher:
         self.build_patches()
         self.build_mods()
         self.build_controls()
+        self.build_trophies()
         self.build_advanced()
         self.build_log()
         self.root.bind_all('<MouseWheel>', self.wheel)
@@ -884,6 +906,8 @@ class Launcher:
             self.refresh_fsr4()
         elif name == 'home':
             self.refresh_status()
+        elif name == 'trophies':
+            self.refresh_trophies()
 
     def build_home(self):
         tk, ttk = self.tk, self.ttk
@@ -1405,6 +1429,114 @@ class Launcher:
             self.control_vars['key'][button].set(key)
             self.control_vars['pad'][button].set(pad or '')
         self.relabel_pad_controls()
+
+    # ---- trophies ----------------------------------------------------------------------------
+    def build_trophies(self):
+        tk, ttk = self.tk, self.ttk
+        f = self.scrolled_page('trophies', _('Trophies', 'Трофеи'),
+                               _('The trophies this port recorded while you played.',
+                                 'Трофеи, которые порт записал во время игры.'))
+        self.trophy_images = []
+        head = ttk.Frame(f)
+        head.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(4, 0))
+        self.trophy_summary = ttk.Label(head, text='', style='Section.TLabel')
+        self.trophy_summary.pack(side='left')
+        ttk.Button(head, text=_('Refresh', 'Обновить'), command=self.refresh_trophies).pack(side='right')
+        ttk.Button(head, text=_('Reset trophies', 'Сбросить трофеи'), command=self.reset_trophies).pack(
+            side='right', padx=(0, 8))
+        self.trophy_filter = ttk.Combobox(head, state='readonly', width=14,
+                                          values=[_('All trophies', 'Все'), _('Unlocked', 'Получены'),
+                                                  _('Locked', 'Закрыты')])
+        self.trophy_filter.current(0)
+        self.trophy_filter.bind('<<ComboboxSelected>>', lambda _e: self.refresh_trophies())
+        self.trophy_filter.pack(side='right', padx=(0, 8))
+        self.trophy_list = tk.Frame(f, bg=PANEL)
+        self.trophy_list.grid(row=self.next_row(f), column=0, columnspan=2, sticky='we', pady=(10, 0))
+        self.note(f, _('Only trophies unlocked with this port are listed; the ones earned on a PlayStation are not '
+                       'known to it. In the game, F8 or R3+R2 shows the same list.',
+                       'Показаны только трофеи, полученные через этот порт; полученные на PlayStation ему '
+                       'неизвестны. В игре этот же список открывает F8 или R3+R2.'))
+
+    def reset_trophies(self):
+        path = self.user_dir() / 'trophies.dat'
+        if self.process:
+            self.messagebox.showwarning(APP_NAME, _('Close the game before resetting the trophies.',
+                                                    'Закройте игру перед сбросом трофеев.'))
+            return
+        unlocked = len(trophies.read_unlocked(path))
+        if not unlocked:
+            self.messagebox.showinfo(APP_NAME, _('No trophy is unlocked.', 'Нет полученных трофеев.'))
+            return
+        if not self.messagebox.askyesno(APP_NAME, _(
+                'Lock all {} unlocked trophies again? A copy is kept as trophies.dat.bak.',
+                'Снова закрыть все полученные трофеи ({})? Копия сохранится как trophies.dat.bak.').format(unlocked)):
+            return
+        try:
+            trophies.reset(path)
+        except OSError as error:
+            self.messagebox.showerror(APP_NAME, _('Could not reset the trophies: {}',
+                                                  'Не удалось сбросить трофеи: {}').format(error))
+        self.refresh_trophies()
+
+    def trophy_photo(self, png, locked):
+        """The icon as a 56 px (DPI-scaled) image; dimmed grey when the trophy is not unlocked."""
+        tk, size = self.tk, self.px(56)
+        try:
+            from PIL import Image, ImageTk
+            image = Image.open(io.BytesIO(png)).convert('RGB').resize((size, size), Image.LANCZOS)
+            if locked:
+                image = image.convert('L').point(lambda v: int(v * 0.5)).convert('RGB')
+            photo = ImageTk.PhotoImage(image)
+        except (ImportError, OSError):
+            photo = tk.PhotoImage(width=size, height=size)
+        self.trophy_images.append(photo)  # Tk drops an image nobody references
+        return photo
+
+    def refresh_trophies(self):
+        tk = self.tk
+        for child in self.trophy_list.winfo_children():
+            child.destroy()
+        self.trophy_images = []
+        folder = self.var('game_dir', 'app').get()
+        icons = trophies.read_trp_icons(Path(folder) / 'sce_sys' / 'trophy' / 'trophy00.trp') if folder else {}
+        if not icons:
+            self.trophy_summary.configure(text='')
+            tk.Label(self.trophy_list, text=_('No trophy list: choose the game folder on the Game page (its '
+                                              'sce_sys/trophy/trophy00.trp is read).',
+                                              'Нет списка трофеев: выберите папку игры на странице «Игра» '
+                                              '(читается sce_sys/trophy/trophy00.trp).'),
+                     bg=PANEL, fg=MUTED, font=self.f('body', 10), justify='left', anchor='w',
+                     wraplength=self.px(680)).pack(anchor='w')
+            return
+        unlocked = trophies.read_unlocked(self.user_dir() / 'trophies.dat')
+        ids = sorted(icons)
+        self.trophy_summary.configure(text=_('{} of {} unlocked', '{} из {} получено').format(
+            sum(1 for i in ids if i in unlocked), len(ids)))
+        show = self.trophy_filter.current()  # 0 all, 1 unlocked, 2 locked
+        for trophy in ids:
+            got = trophy in unlocked
+            if (show == 1 and not got) or (show == 2 and got):
+                continue
+            card = tk.Frame(self.trophy_list, bg=CARD, highlightthickness=1,
+                            highlightbackground=GOLD if got else LINE)
+            card.pack(fill='x', pady=3)
+            tk.Label(card, image=self.trophy_photo(icons[trophy], not got), bg=CARD).pack(
+                side='left', padx=(10, 12), pady=8)
+            text = tk.Frame(card, bg=CARD)
+            text.pack(side='left', fill='x', expand=True)
+            name, description = trophies.text(trophy, LANG)
+            tk.Label(text, text=name or _('Trophy {}', 'Трофей {}').format(trophy), bg=CARD,
+                     fg=TEXT if got else MUTED, font=self.f('body', 11, 'bold'), anchor='w').pack(fill='x')
+            if description:
+                tk.Label(text, text=description, bg=CARD, fg=TEXT if got else MUTED, font=self.f('body', 10),
+                         anchor='w', justify='left', wraplength=self.px(520)).pack(fill='x')
+            grade = trophies.tier(trophy)
+            label, colour = (_(*TROPHY_TIERS[grade][:2]), TROPHY_TIERS[grade][2]) if grade else ('', MUTED)
+            if label:
+                tk.Label(text, text=label, bg=CARD, fg=colour if got else MUTED, font=self.f('body', 9),
+                         anchor='w').pack(fill='x')
+            tk.Label(card, text=_('UNLOCKED', 'ПОЛУЧЕН') if got else _('LOCKED', 'ЗАКРЫТ'), bg=CARD,
+                     fg=GOLD if got else MUTED, font=self.f('body', 9, 'bold')).pack(side='right', padx=16)
 
     def build_advanced(self):
         tk, ttk = self.tk, self.ttk
