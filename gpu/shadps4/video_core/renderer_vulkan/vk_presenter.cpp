@@ -668,7 +668,8 @@ Frame* Presenter::PrepareFrame(const Libraries::VideoOut::BufferAttributeGroup& 
     }
     expected_ratio = static_cast<float>(image_size.width) / static_cast<float>(image_size.height);
 
-    // gow3: FSR 1, RCAS and its strength come from the in-game menu, every frame.
+    // gow3: RCAS and its strength come from the in-game menu, every frame; FSR 1 only from
+    // medievil.ini (fsr1=1) or GOW3_FSR1, no longer offered in the menus.
     const auto& graphics = Gow3Settings::Get();
     fsr_settings.enable = graphics.fsr1;
     fsr_settings.use_rcas = graphics.rcas;
