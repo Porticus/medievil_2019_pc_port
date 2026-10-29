@@ -416,6 +416,13 @@ void ImageTab() {
         ImGui::EndDisabled();
         ImGui::EndTable();
     }
+    if (s.fg_active) {
+        ImGui::SeparatorText("Frame generation (FSR)");
+        if (BeginRows("##framegen")) {
+            CheckRow("Frame generation", s.fg_enabled, "Shows a generated frame between each two game frames: up to twice the frame rate, with a little more latency.");
+            ImGui::EndTable();
+        }
+    }
     ImGui::SeparatorText("Information");
     if (BeginRows("##image_info")) {
         char text[96];
